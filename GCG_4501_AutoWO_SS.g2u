@@ -1,0 +1,168 @@
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.SetErrorHandler("Main_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+'Created by: WAW
+'Coded: 5/4/2017
+'This project will take the value in the Safety Stock field of the Inventory master and use this when determining the Auto Work Order Generation.  Runs on hook 28604
+
+
+F.ODBC.Connection!conx.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass,7200)
+
+f.Intrinsic.Control.CallSub(Process)
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Main_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4501_AutoWO_SS.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Main.End
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.SetErrorHandler("Unload_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+'closing connection and ending program
+F.ODBC.Connection!conx.Close
+f.Intrinsic.Control.End
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Unload_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4501_AutoWO_SS.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.End
+
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Unload.End
+
+Program.Sub.Process.Start
+F.Intrinsic.Control.SetErrorHandler("Process_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+v.Local.irowcnt.Declare(long)
+v.Local.i.Declare(long)
+v.Local.sreadrow.Declare(string)
+v.Local.swriterow.Declare(String)
+v.Local.fsafetystock.Declare(float,0)
+v.Local.fopenwoqty.Declare(float,0)
+v.Local.fconsignment.Declare(float,0)
+v.Local.fsoDemand.Declare(float,0)
+v.Local.frunqty.Declare(float,0)
+v.Local.fonhand.Declare(float,0)
+V.Local.fReqQty.Declare(Float, 0)
+V.Local.fOrderQty.Declare(Float,0)
+V.Local.fTotal.Declare(Float, 0)
+v.Local.spart.Declare(string)
+v.Local.ssql.Declare(string)
+v.Local.sret.Declare(String)
+v.Local.sso.Declare(String)
+v.Local.sline.Declare(string)
+
+Function.Intrinsic.BDF.Load("AUX001","AUX001")
+Function.Intrinsic.BDF.Clone("AUX001","Clone")
+Function.Intrinsic.BDF.ReadRowCount("AUX001",Variable.local.iRowCnt)
+Function.Intrinsic.Math.Sub(Variable.Local.iRowCnt,1,Variable.Local.iRowCnt)
+
+Function.Intrinsic.Control.For(Variable.Local.i,0,Variable.Local.iRowCnt,1)
+	'Read data from AUX001
+	Function.Intrinsic.BDF.ReadRow("AUX001",Variable.local.i,Variable.Local.sReadRow)
+	
+	'string delimiter(|~|) splits row from a string into an array
+	Function.Intrinsic.String.Split(Variable.Local.sReadRow,"|~|",Variable.local.sreadrow)
+	f.Intrinsic.String.GSSPartString(v.Local.sreadrow(0),v.Local.sreadrow(1),v.Local.spart)
+
+	'get the shipped qty(consignment)
+'	f.Intrinsic.String.Build("Select QTY_SHIPPED from V_ORDER_LINES where ORDER_NO = '{0}' and RECORD_NO = '{1}'",v.Local.sso.trim,v.Local.sline.Trim,v.Local.ssql)
+	
+	F.Intrinsic.String.Build("Select SUM(QTY_SHIPPED) as QTY_SHIPPED from V_ORDER_LINES where PART = '{0}' and LINE_TYPE = 'C'", V.Local.spart, V.Local.ssql)
+	F.ODBC.Connection!conx.OpenRecordsetRO("rst",V.Local.sSql)
+	F.Intrinsic.Control.If(V.ODBC.conx!rst.EOF,=,False)
+		v.Local.fconsignment.Set(v.ODBC.conx!rst.FieldValFloat!QTY_SHIPPED)
+	f.Intrinsic.Control.Else
+		v.Local.fconsignment.Set(0)
+	f.Intrinsic.Control.EndIf
+	f.ODBC.conx!rst.Close
+	
+	'get the safety stock
+	f.Intrinsic.String.Build("Select QTY_SAFETY, QTY_ONORDER_WO, QTY_ONHAND, QTY_REQUIRED, QTY_ORDER from V_INVENTORY_MSTR where PART = '{0}' and LOCATION = '{1}'",v.Local.spart.Trim,v.Local.sreadrow(2).Trim,v.Local.ssql)
+	F.ODBC.Connection!conx.OpenRecordsetRO("rst",V.Local.sSql)
+	F.Intrinsic.Control.If(V.ODBC.conx!rst.EOF,=,False)
+		v.Local.fsafetystock.Set(v.ODBC.conx!rst.FieldValFloat!QTY_SAFETY)
+		V.Local.fopenwoqty.Set(V.ODBC.conx!rst.FieldValFloat!QTY_ONORDER_WO)
+		V.Local.fonhand.Set(V.ODBC.conx!rst.FieldValFloat!QTY_ONHAND)
+		V.Local.fReqQty.Set(V.ODBC.conx!rst.FieldValFloat!QTY_REQUIRED)
+		V.Local.fOrderQty.Set(V.ODBC.conx!rst.FieldValFloat!QTY_ORDER)
+	f.Intrinsic.Control.Else
+		v.Local.fsafetystock.Set(0)
+		V.Local.fopenwoqty.Set(0)
+		V.Local.fonhand.Set(0)
+		V.Local.fReqQty.Set(0)
+		V.Local.fOrderQty.Set(0)
+	f.Intrinsic.Control.EndIf
+	f.ODBC.conx!rst.Close
+	
+	'The calculation used is Quantity on hand - Safety Stock + open wo quantity - consignment (su of qty shipped from order lines where line type = 'C') - required quantity
+	'QTY on Hand - Safety stock(field in Inventory parts)
+	f.Intrinsic.Math.Sub(v.Local.fonhand,v.Local.fsafetystock,v.Local.frunqty)
+	'+ Open work order QTY - Consignment (Ship QTY on Sales Order) 
+	f.Intrinsic.Math.Add(v.Local.frunqty,v.Local.fopenwoqty,v.Local.frunqty)
+	f.Intrinsic.Math.Sub(v.Local.frunqty,v.Local.fconsignment,v.Local.frunqty)
+	'- Sales Order Demand (Ship Schedule Open QTY) = Work Order Run Quantity
+	F.Intrinsic.Math.Sub(V.Local.frunqty, V.Local.fReqQty, V.Local.frunqty)
+	
+	'Need final number to be positive
+	F.Intrinsic.Math.Mult(V.Local.frunqty, -1, V.Local.frunqty)
+	
+	'If part has an order quantyty, we must take the roof of the quantity to the order quantity
+	F.Intrinsic.Control.If(V.Local.fOrderQty, >, 0)
+		V.Local.fTotal.Set(V.Local.fOrderQty)
+		F.Intrinsic.Control.DoUntil(V.Local.fTotal, >, V.Local.frunqty)
+			F.Intrinsic.Math.Add(V.Local.fTotal, V.Local.fOrderQty, V.Local.fTotal)
+		F.Intrinsic.Control.Loop
+		V.Local.frunqty.Set(V.Local.fTotal)
+	F.Intrinsic.Control.EndIf
+		
+	V.Local.sreadrow(4).Set(V.Local.frunqty)
+	F.Intrinsic.String.Join(V.Local.sreadrow, "|~|", V.local.swriterow)
+	V.Passed.777777.Set(1)
+	
+	'Writes row with data from sWriteRow to BDF named Clone
+	Function.Intrinsic.BDF.WriteRow("Clone",Variable.Local.sWriteRow)
+f.Intrinsic.Control.Next(v.Local.i)
+
+'Writes CloneBDF to be read by CORE
+Function.Intrinsic.BDF.Save("Clone","AUX001")
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Process_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4501_AutoWO_SS.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.CallSub(unload)	
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Process.End
+
+Program.Sub.Comments.Start
+${$0$}$$}$WAW$}$5/4/2017 3:44:36 PM$}$False
+Program.Sub.Comments.End
